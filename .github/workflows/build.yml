@@ -1,0 +1,71 @@
+name: Build QR Scanner
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04  # Use older Ubuntu for better glibc compatibility
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++ musl-tools
+    
+    - name: Build (dynamic)
+      run: |
+        g++ -Wall -Wextra -O2 -std=c++11 -o qr_scanner qr_scanner.cpp -lpthread
+        file qr_scanner
+        ls -la qr_scanner
+    
+    - name: Build (static with musl for maximum portability)
+      run: |
+        musl-gcc -Wall -Wextra -O2 -std=c++11 -static -o qr_scanner_static qr_scanner.cpp
+        file qr_scanner_static
+        ls -la qr_scanner_static
+    
+    - name: Test binary runs
+      run: |
+        ./qr_scanner --help
+        ./qr_scanner_static --help
+    
+    - name: Upload dynamic binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: qr_scanner_linux_x64
+        path: qr_scanner
+        retention-days: 30
+    
+    - name: Upload static binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: qr_scanner_linux_x64_static
+        path: qr_scanner_static
+        retention-days: 30
+
+  # Create a release when pushing a tag
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          qr_scanner_linux_x64/qr_scanner
+          qr_scanner_linux_x64_static/qr_scanner_static
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
