@@ -1,11 +1,14 @@
 name: Build for Ubuntu 18.04 (GLIBC 2.27)
 
-on: [push, pull_request]
+on: 
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # MAKNULI SMO 'container:' odavde da GitHub ne zapne s Node verzijom
 
     steps:
       - name: Checkout code
@@ -13,11 +16,19 @@ jobs:
 
       - name: Build in Docker (Ubuntu 18.04)
         run: |
-          # Pokrećemo Docker naredbu koja radi sve u jednom šutu
           docker run --rm -v ${{ github.workspace }}:/app -w /app ubuntu:18.04 /bin/bash -c "
             apt-get update && \
-            DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential cmake qtbase5-dev qt5-default pkg-config && \
-            mkdir -p build && \
+            DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              build-essential \
+              cmake \
+              qtbase5-dev \
+              qt5-default \
+              pkg-config && \
+            
+            rm -rf build && \
+            
+            # Standardni CMake build proces
+            mkdir build && \
             cd build && \
             cmake .. -DCMAKE_BUILD_TYPE=Release && \
             make -j$(nproc)
