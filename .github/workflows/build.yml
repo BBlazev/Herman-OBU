@@ -5,17 +5,16 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Koristimo Docker kontejner unutar GitHub Action-a da osiguramo 18.04 verziju
     container: ubuntu:18.04
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        # PROMJENA: Koristimo v2 jer v3/v4 traže noviji GLIBC
+        uses: actions/checkout@v2
 
       - name: Install dependencies
         run: |
           apt-get update
-          # Instalacija alata (force non-interactive da ne stane na vremenskoj zoni)
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             build-essential \
             cmake \
@@ -35,7 +34,8 @@ jobs:
           make -j$(nproc)
 
       - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
+        # PROMJENA: upload-artifact@v2 je također sigurniji izbor za stare kontejnere
+        uses: actions/upload-artifact@v2
         with:
           name: obu-gui-ubuntu18
           path: |
