@@ -1,0 +1,2 @@
+/usr/bin/ar qc libobu-sdk.a "CMakeFiles/obu-sdk.dir/src/serial.cpp.o" "CMakeFiles/obu-sdk.dir/src/epdi.cpp.o" "CMakeFiles/obu-sdk.dir/src/mboard.cpp.o" "CMakeFiles/obu-sdk.dir/src/terminal.cpp.o" "CMakeFiles/obu-sdk.dir/src/qr_scanner.cpp.o"
+/usr/bin/ranlib libobu-sdk.a

@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/obu_gui.dir/obu_gui_autogen/mocs_compilation.cpp.o CMakeFiles/obu_gui.dir/examples/qt_gui.cpp.o -o obu_gui  libobu-sdk.a /usr/lib/x86_64-linux-gnu/libQt5Widgets.so.5.15.13 /usr/lib/x86_64-linux-gnu/libQt5Gui.so.5.15.13 /usr/lib/x86_64-linux-gnu/libQt5Core.so.5.15.13 
