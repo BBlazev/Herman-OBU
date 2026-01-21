@@ -5,39 +5,36 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Build se i dalje vrti u 18.04 da dobijemo ispravan binarni fajl
     container: ubuntu:18.04
 
     steps:
       - name: Checkout code
-        # PROMJENA: Koristimo v2 jer v3/v4 traže noviji GLIBC
         uses: actions/checkout@v2
 
       - name: Install dependencies
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            build-essential \
-            cmake \
-            qtbase5-dev \
-            qt5-default \
-            pkg-config
+            build-essential cmake qtbase5-dev qt5-default pkg-config
 
-      - name: Configure CMake
+      - name: Configure and Build
         run: |
           mkdir build
           cd build
           cmake .. -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: |
-          cd build
           make -j$(nproc)
 
+      # Umjesto uploada, privremeno spremamo fajlove u kontejneru
+      - name: Prepare files for upload
+        run: |
+          mkdir -p output
+          cp build/obu_gui output/
+          cp build/obu_test output/
+
+      # Ovaj korak "izvlači" fajlove iz kontejnera natrag na runner
       - name: Upload Build Artifact
-        # PROMJENA: upload-artifact@v2 je također sigurniji izbor za stare kontejnere
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: obu-gui-ubuntu18
-          path: |
-            build/obu_gui
-            build/obu_test
+          path: output/
