@@ -5,36 +5,28 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Build se i dalje vrti u 18.04 da dobijemo ispravan binarni fajl
-    container: ubuntu:18.04
+    # MAKNULI SMO 'container:' odavde da GitHub ne zapne s Node verzijom
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Build in Docker (Ubuntu 18.04)
         run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            build-essential cmake qtbase5-dev qt5-default pkg-config
+          # Pokrećemo Docker naredbu koja radi sve u jednom šutu
+          docker run --rm -v ${{ github.workspace }}:/app -w /app ubuntu:18.04 /bin/bash -c "
+            apt-get update && \
+            DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential cmake qtbase5-dev qt5-default pkg-config && \
+            mkdir -p build && \
+            cd build && \
+            cmake .. -DCMAKE_BUILD_TYPE=Release && \
+            make -j$(nproc)
+          "
 
-      - name: Configure and Build
-        run: |
-          mkdir build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
-          make -j$(nproc)
-
-      # Umjesto uploada, privremeno spremamo fajlove u kontejneru
-      - name: Prepare files for upload
-        run: |
-          mkdir -p output
-          cp build/obu_gui output/
-          cp build/obu_test output/
-
-      # Ovaj korak "izvlači" fajlove iz kontejnera natrag na runner
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: obu-gui-ubuntu18
-          path: output/
+          path: |
+            build/obu_gui
+            build/obu_test
