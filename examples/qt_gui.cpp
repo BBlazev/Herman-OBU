@@ -12,6 +12,7 @@
 #include <atomic>
 #include <mutex>
 #include <queue>
+#include <memory>
 
 #include "devices/mboard.hpp"
 #include "devices/terminal.hpp"
@@ -104,23 +105,7 @@ public:
         }
         qr_serial_.set_timeout_ms(3000);
         
-
-        nfc_.set_log_callback([this](const std::string& msg) {
-            std::lock_guard<std::mutex> lock(queue_mutex_);
-            log_queue_.push(QString::fromStdString(msg));
-        });
-        
-        if (nfc_.is_port_open()) {
-            logMsg("[INIT] NFC port open, initializing...");
-            nfc_.initialize();
-            if (nfc_.is_initialized()) {
-                logMsg("[INIT] NFC OK");
-            } else {
-                logMsg("[INIT] NFC auth failed");
-            }
-        } else {
-            logMsg("[INIT] NFC port FAILED to open");
-        }
+        logMsg("[INIT] NFC will init on Start button click");
         
         status_label_->setText("Status: Ready");
     }
@@ -218,20 +203,37 @@ private slots:
             return;
         }
         
-        if (!nfc_.is_initialized()) {
-            nfc_label_->setText("NFC: Init failed");
-            logMsg("[NFC] Not initialized");
+        if (!nfc_) {
+            logMsg("[NFC] Creating NFC reader on /dev/ttyACM2...");
+            nfc_ = std::make_unique<Nfc_reader>("/dev/ttyACM2", B9600);
+            
+            nfc_->set_log_callback([this](const std::string& msg) {
+                std::lock_guard<std::mutex> lock(queue_mutex_);
+                log_queue_.push(QString::fromStdString(msg));
+            });
+            
+            nfc_->set_card_callback([this](const CardInfo& card) {
+                std::lock_guard<std::mutex> lock(queue_mutex_);
+                card_queue_.push(QString::fromStdString(card.uidHex));
+            });
+        }
+        
+        if (!nfc_->is_port_open()) {
+            logMsg(QString("[NFC] Port error: %1").arg(QString::fromStdString(nfc_->get_init_error())));
             return;
         }
         
-        nfc_.set_card_callback([this](const CardInfo& card) {
-            std::lock_guard<std::mutex> lock(queue_mutex_);
-            card_queue_.push(QString::fromStdString(card.uidHex));
-        });
+        logMsg("[NFC] Port open, initializing...");
+        nfc_->initialize();
+        
+        if (!nfc_->is_initialized()) {
+            logMsg("[NFC] Init failed");
+            return;
+        }
         
         nfc_running_.store(true);
         nfc_thread_ = std::thread([this]() { 
-            nfc_.start(); 
+            nfc_->start(); 
             nfc_running_.store(false);
             nfc_stopped_flag_ = true;
         });
@@ -246,7 +248,9 @@ private slots:
     void stopNfc()
     {
         if (!nfc_running_.load()) return;
-        nfc_.stop();
+        if (nfc_) {
+            nfc_->stop();
+        }
         if (nfc_thread_.joinable()) {
             nfc_thread_.join();
         }
@@ -270,7 +274,7 @@ private:
     Mboard mboard_;
     Terminal terminal_;
     QrScanner qr_;
-    Nfc_reader nfc_;
+    std::unique_ptr<Nfc_reader> nfc_;
     
     std::thread nfc_thread_;
     std::atomic<bool> nfc_running_{false};

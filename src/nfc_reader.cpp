@@ -17,11 +17,14 @@ void Nfc_reader::log(const std::string& msg)
 
 Nfc_reader::Nfc_reader(const char* device, speed_t baud)
 {
-    fd_ = ::open(device, O_RDWR | O_NOCTTY);
+    fd_ = ::open(device, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd_ < 0) {
         init_error_ = std::string("Failed to open ") + device + ": " + strerror(errno);
         return;
     }
+    
+    int flags = fcntl(fd_, F_GETFL, 0);
+    fcntl(fd_, F_SETFL, flags & ~O_NONBLOCK);
     
     struct termios tty{};
     if (tcgetattr(fd_, &tty) != 0) {

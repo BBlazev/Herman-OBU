@@ -7,6 +7,7 @@
 #include <functional>
 #include <vector>
 #include <termios.h>
+
 namespace nfc {
     enum class Command : uint8_t {
         AddrReq   = 0xF2,
