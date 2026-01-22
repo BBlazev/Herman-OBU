@@ -11,7 +11,8 @@ enum class Error
     PORT_ERROR,
     NFC_INIT,
     NFC_AUTH,
-    CMD_FAILURE
+    CMD_FAILURE,
+    READ_ERROR
 };
 
 template<typename T> 

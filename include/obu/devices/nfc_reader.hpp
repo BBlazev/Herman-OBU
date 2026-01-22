@@ -15,18 +15,18 @@ public:
     Nfc_reader();
     ~Nfc_reader();
     
+    Result<bool> initialized = Result<bool>::success(true);
 
 private:
     int fd_;
     //SerialPort& serial_;
     uint8_t counter;
-    Result<bool> initialized = Result<bool>::success(true);
 
 
     Result<bool> init();
-    Result<bool> auth();
-    Result<bool> send_command(uint8_t cmd, const std::vector<uint8_t>& data = {});
-    Result<std::vector<uint8_t>> read_response(size_t len);
+    Result<bool> send_command(uint8_t cmd, std::span<const uint8_t> data = {});
     void start_NFC();
+    [[nodiscard]]Result<std::vector<uint8_t>> read_response(size_t len);
+    [[nodiscard]] Result<bool> auth();
 
 };

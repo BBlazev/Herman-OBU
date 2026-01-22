@@ -1,4 +1,4 @@
-name: Build for Ubuntu 18.04
+name: Build OBU SDK
 
 on: 
   push:
@@ -7,14 +7,13 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build:
+  build-cli:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build in Docker (Ubuntu 18.04)
+      - name: Build CLI in Docker (Ubuntu 18.04)
         run: |
           docker run --rm -v ${{ github.workspace }}:/app -w /app ubuntu:18.04 /bin/bash -c "
             apt-get update && \
@@ -30,8 +29,38 @@ jobs:
             make -j\$(nproc)
           "
 
-      - name: Upload Build Artifact
+      - name: Upload CLI Artifact
         uses: actions/upload-artifact@v4
         with:
           name: obu-cli-test
           path: build/cli_test
+
+  build-qt-gui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Qt GUI in Docker
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/app -w /app ubuntu:18.04 /bin/bash -c "
+            apt-get update && \
+            DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              build-essential \
+              cmake \
+              pkg-config \
+              qt5-default \
+              qtbase5-dev && \
+            
+            rm -rf build && \
+            mkdir build && \
+            cd build && \
+            cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_QT_GUI=ON && \
+            make -j\$(nproc)
+          "
+
+      - name: Upload Qt GUI Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obu-qt-gui
+          path: build/qt_gui
