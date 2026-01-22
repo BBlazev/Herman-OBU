@@ -7,6 +7,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cerrno>
+#include <poll.h>
 
 void Nfc_reader::log(const std::string& msg)
 {
@@ -44,8 +45,8 @@ Nfc_reader::Nfc_reader(const char* device, speed_t baud)
     tty.c_iflag &= ~IGNBRK;
     tty.c_lflag = 0;
     tty.c_oflag = 0;
-    tty.c_cc[VMIN] = 1;
-    tty.c_cc[VTIME] = 10;
+    tty.c_cc[VMIN] = 0;
+    tty.c_cc[VTIME] = 1;  // 100ms timeout
 
     if (tcsetattr(fd_, TCSANOW, &tty) != 0) {
         init_error_ = std::string("tcsetattr failed: ") + strerror(errno);
@@ -134,6 +135,14 @@ Result<bool> Nfc_reader::send_command(nfc::Command cmd, const std::vector<uint8_
 
 Result<std::vector<uint8_t>> Nfc_reader::read_response(size_t len)
 {
+    struct pollfd pfd = {fd_, POLLIN, 0};
+    int ret = poll(&pfd, 1, 1000);  // 1 sec timeout
+    
+    if (ret <= 0) {
+        log("[NFC] RX: timeout");
+        return Result<std::vector<uint8_t>>::success(std::vector<uint8_t>());
+    }
+    
     std::vector<uint8_t> buffer(len);
     ssize_t n = ::read(fd_, buffer.data(), buffer.size());
     
@@ -147,7 +156,7 @@ Result<std::vector<uint8_t>> Nfc_reader::read_response(size_t len)
         log(oss.str());
     } else {
         buffer.clear();
-        log("[NFC] RX: timeout/empty");
+        log("[NFC] RX: empty");
     }
     
     return Result<std::vector<uint8_t>>::success(std::move(buffer));
@@ -171,6 +180,18 @@ void Nfc_reader::start()
         std::vector<uint8_t> frameBuffer;
 
         while (running_.load()) {
+            struct pollfd pfd = {fd_, POLLIN, 0};
+            int ret = poll(&pfd, 1, 100);  // 100ms timeout - allows checking running_ flag
+            
+            if (ret < 0) {
+                log("[NFC] Poll error: " + std::string(strerror(errno)));
+                break;
+            }
+            
+            if (ret == 0) {
+                continue;  // Timeout, check running_ and loop
+            }
+            
             uint8_t b = 0;
             ssize_t bytesRead = ::read(fd_, &b, 1);
             
