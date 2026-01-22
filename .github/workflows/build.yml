@@ -1,4 +1,4 @@
-name: Build for Ubuntu 18.04 (GLIBC 2.27)
+name: Build for Ubuntu 18.04
 
 on: 
   push:
@@ -21,23 +21,17 @@ jobs:
             DEBIAN_FRONTEND=noninteractive apt-get install -y \
               build-essential \
               cmake \
-              qtbase5-dev \
-              qt5-default \
               pkg-config && \
             
             rm -rf build && \
-            
-            # Standardni CMake build proces
             mkdir build && \
             cd build && \
             cmake .. -DCMAKE_BUILD_TYPE=Release && \
-            make -j$(nproc)
+            make -j\$(nproc)
           "
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: obu-gui-ubuntu18
-          path: |
-            build/obu_gui
-            build/obu_test
+          name: obu-cli-test
+          path: build/cli_test
