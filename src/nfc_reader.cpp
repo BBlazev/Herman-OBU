@@ -1,10 +1,18 @@
 #include "devices/nfc_reader.hpp"
+#include "common/helpers.hpp"
 #include <fcntl.h>
 #include <unistd.h>
 #include <termios.h>
 #include <cstring>
 #include <sstream>
 #include <iomanip>
+
+// Command constants
+static constexpr uint8_t ADDR_REQ  = 0xF2;
+static constexpr uint8_t AUTH_A    = 0x02;
+static constexpr uint8_t AUTH_B    = 0x03;
+static constexpr uint8_t ENABLE    = 0x63;
+static constexpr uint8_t READ_CARD = 0xE3;
 
 void Nfc_reader::log(const std::string& msg)
 {
@@ -15,10 +23,43 @@ void Nfc_reader::log(const std::string& msg)
 
 Nfc_reader::Nfc_reader(const char* device)
 {
-    auto result = init(device);
-    if (!result.ok()) {
-        log("[NFC] Init failed: " + std::string(strerror(errno)));
+    fd_ = ::open(device, O_RDWR | O_NOCTTY);
+    if (fd_ < 0) {
+        log("[NFC] Failed to open " + std::string(device) + ": " + strerror(errno));
+        return;
     }
+
+    struct termios tty;
+    memset(&tty, 0, sizeof(tty));
+    if (tcgetattr(fd_, &tty) != 0) {
+        log("[NFC] tcgetattr failed: " + std::string(strerror(errno)));
+        ::close(fd_);
+        fd_ = -1;
+        return;
+    }
+
+    cfsetospeed(&tty, B921600);
+    cfsetispeed(&tty, B921600);
+
+    tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
+    tty.c_iflag &= ~IGNBRK;
+    tty.c_lflag = 0;
+    tty.c_oflag = 0;
+    tty.c_cc[VMIN] = 0;
+    tty.c_cc[VTIME] = 10;
+    tty.c_cflag |= (CLOCAL | CREAD);
+    tty.c_cflag &= ~(PARENB | PARODD);
+    tty.c_cflag &= ~CSTOPB;
+    tty.c_cflag &= ~CRTSCTS;
+
+    if (tcsetattr(fd_, TCSANOW, &tty) != 0) {
+        log("[NFC] tcsetattr failed: " + std::string(strerror(errno)));
+        ::close(fd_);
+        fd_ = -1;
+        return;
+    }
+
+    initialize();
 }
 
 Nfc_reader::~Nfc_reader()
@@ -30,116 +71,60 @@ Nfc_reader::~Nfc_reader()
     }
 }
 
-Result<bool> Nfc_reader::init(const char* device)
+void Nfc_reader::send_cmd(uint8_t cmd, const std::vector<uint8_t>& data)
 {
-    fd_ = ::open(device, O_RDWR | O_NOCTTY);
-    if (fd_ < 0)
-        return Result<bool>::failure(Error::NFC_INIT);
-    
-    struct termios tty{};
-    if (tcgetattr(fd_, &tty) != 0) {
-        ::close(fd_);
-        fd_ = -1;
-        return Result<bool>::failure(Error::PORT_ERROR);
-    }
-    
-    cfsetispeed(&tty, B921600);
-    cfsetospeed(&tty, B921600);
-    cfmakeraw(&tty);
-
-    tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
-    tty.c_cflag |= (CLOCAL | CREAD);
-    tty.c_cflag &= ~(PARENB | PARODD | CSTOPB | CRTSCTS);
-    tty.c_iflag &= ~IGNBRK;
-    tty.c_lflag = 0;
-    tty.c_oflag = 0;
-    tty.c_cc[VMIN] = 0;
-    tty.c_cc[VTIME] = 10;
-
-    if (tcsetattr(fd_, TCSANOW, &tty) != 0) {
-        ::close(fd_);
-        fd_ = -1;
-        return Result<bool>::failure(Error::PORT_ERROR);
-    }
-
-    tcflush(fd_, TCIOFLUSH);
-    
-    auto auth_result = auth();
-    initialized_.store(auth_result.ok());
-    return auth_result;
-}
-
-Result<bool> Nfc_reader::send_command(nfc::Command cmd, const std::vector<uint8_t>& data)
-{
-    std::vector<uint8_t> frame;
-    frame.reserve(3 + data.size());
-    frame.push_back(static_cast<uint8_t>(nfc::Command::AddrReq));
-    frame.push_back(static_cast<uint8_t>(cmd));
-    frame.push_back(counter_++);
+    std::vector<uint8_t> frame = { ADDR_REQ, cmd, counter_++ };
     frame.insert(frame.end(), data.begin(), data.end());
 
+    std::ostringstream oss;
+    oss << "[NFC] TX: ";
+    for (uint8_t byte : frame) {
+        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte) << " ";
+    }
+    log(oss.str());
+
     ssize_t nw = ::write(fd_, frame.data(), frame.size());
-    if (nw < 0 || static_cast<size_t>(nw) != frame.size())
-        return Result<bool>::failure(Error::CMD_FAILURE);
-
-    return Result<bool>::success(true);
+    if (nw < 0) {
+        log("[NFC] Write failed: " + std::string(strerror(errno)));
+    }
 }
 
-Result<std::vector<uint8_t>> Nfc_reader::read_response(size_t len)
+std::vector<uint8_t> Nfc_reader::read_resp(size_t expected_size)
 {
-    std::vector<uint8_t> buffer(len);
-    ssize_t n = ::read(fd_, buffer.data(), buffer.size());
-    
-    if (n < 0)
-        return Result<std::vector<uint8_t>>::failure(Error::READ_ERROR);
-    
-    buffer.resize(static_cast<size_t>(n));
-    return Result<std::vector<uint8_t>>::success(std::move(buffer));
+    std::vector<uint8_t> buffer(expected_size);
+    ssize_t n = ::read(fd_, buffer.data(), expected_size);
+    if (n > 0) {
+        buffer.resize(n);
+    } else {
+        buffer.clear();
+    }
+    return buffer;
 }
 
-Result<bool> Nfc_reader::auth()
+void Nfc_reader::initialize()
 {
+    if (initialized_.load() || fd_ < 0) {
+        return;
+    }
+
     log("[NFC] AUTH PART A");
-    auto send_result = send_command(nfc::Command::AuthA);
-    if (!send_result.ok()) {
-        log("[NFC] AUTH A send failed");
-        return Result<bool>::failure(Error::CMD_FAILURE);
-    }
-    
-    auto result = read_response(16);
-    if (!result.ok()) {
-        log("[NFC] AUTH A read failed");
-        return Result<bool>::failure(Error::READ_ERROR);
-    }
+    send_cmd(AUTH_A);
+    auto resp = read_resp(16);
 
     std::vector<uint8_t> key;
-    if (result.value().size() >= 4) {
-        key.assign(result.value().begin() + 4, result.value().end());
-        log("[NFC] Got auth key, " + std::to_string(key.size()) + " bytes");
+    if (resp.size() < 4) {
+        log("[NFC] No valid Auth Key received, continuing with empty key");
     } else {
-        log("[NFC] No valid Auth Key, continuing with empty key");
+        key.assign(resp.begin() + 4, resp.end());
+        log("[NFC] Got auth key, " + std::to_string(key.size()) + " bytes");
     }
 
     log("[NFC] AUTH PART B");
-    send_result = send_command(nfc::Command::AuthB, key);
-    if (!send_result.ok()) {
-        log("[NFC] AUTH B send failed");
-        return Result<bool>::failure(Error::CMD_FAILURE);
-    }
-    
-    auto result2 = read_response(64);
-    if (!result2.ok()) {
-        log("[NFC] AUTH B read failed");
-        return Result<bool>::failure(Error::READ_ERROR);
-    }
+    send_cmd(AUTH_B, key);
+    read_resp(64);
 
-    if (!result.value().empty() && !result2.value().empty()) {
-        log("[NFC] AUTH failed - unexpected response");
-        return Result<bool>::failure(Error::NFC_AUTH);
-    }
-    
-    log("[NFC] AUTH OK");
-    return Result<bool>::success(true);
+    initialized_.store(true);
+    log("[NFC] Initialized OK");
 }
 
 void Nfc_reader::start()
@@ -148,51 +133,60 @@ void Nfc_reader::start()
         log("[NFC] Cannot start - not initialized");
         return;
     }
-    
+
     running_.store(true);
-    log("[NFC] Started");
-    
+    log("[NFC] Reader started");
+
     while (running_.load()) 
     {
-        log("[NFC] Enabling card reading...");
-        auto send_result = send_command(nfc::Command::Enable);
-        if (!send_result.ok()) {
-            log("[NFC] Failed to enable card reading");
-            continue;
-        }
+        log("[NFC] ENABLE CARD READING");
+        send_cmd(ENABLE);
 
         std::vector<uint8_t> frameBuffer;
 
-        while (running_.load()) {
+        while (running_.load()) 
+        {
             uint8_t b = 0;
             ssize_t bytesRead = ::read(fd_, &b, 1);
             
-            if (bytesRead > 0) {
+            if (bytesRead > 0) 
+            {
                 frameBuffer.push_back(b);
 
                 auto parsed = parseCardInfo(frameBuffer);
-                if (parsed && parsed->service == static_cast<uint8_t>(nfc::Command::ReadCard) 
-                    && parsed->ack == 0) 
+                if (parsed && parsed->service == READ_CARD && parsed->ack == 0) 
                 {
-                    std::stringstream ss;
-                    ss << "[NFC] Card: UID=" << parsed->uidHex
-                       << " ATQA=0x" << std::hex << std::setw(4) << std::setfill('0') << parsed->atqa
-                       << " SAK=0x" << std::setw(2) << static_cast<int>(parsed->sak);
-                    log(ss.str());
+                    std::ostringstream oss;
+                    oss << std::uppercase << std::hex
+                        << "[NFC] Card UID=" << parsed->uidHex
+                        << " ATQA=0x" << std::setw(4) << std::setfill('0') << parsed->atqa
+                        << " CT=0x" << std::setw(2) << std::setfill('0') << static_cast<int>(parsed->ct)
+                        << " SAK=0x" << std::setw(2) << std::setfill('0') << static_cast<int>(parsed->sak);
                     
+                    if (!parsed->extraBytes.empty()) {
+                        oss << " EXTRA=0x";
+                        for (uint8_t extra : parsed->extraBytes) {
+                            oss << std::setw(2) << static_cast<int>(extra);
+                        }
+                    }
+                    log(oss.str());
+
+                    // Callback
                     if (card_callback_) {
                         card_callback_(*parsed);
                     }
+                    
                     frameBuffer.clear();
                     break;
                 }
             } 
-            else if (bytesRead < 0 && errno != EAGAIN) {
+            else if (bytesRead < 0 && errno != EAGAIN) 
+            {
                 log("[NFC] Read error: " + std::string(strerror(errno)));
                 break;
             }
         }
     }
-    
-    log("[NFC] Stopped");
+
+    log("[NFC] Reader stopped");
 }
