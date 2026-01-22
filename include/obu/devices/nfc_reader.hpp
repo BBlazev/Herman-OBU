@@ -6,7 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <vector>
-
+#include <termios.h>
 namespace nfc {
     enum class Command : uint8_t {
         AddrReq   = 0xF2,
@@ -20,7 +20,7 @@ namespace nfc {
 class Nfc_reader
 {
 public:
-    explicit Nfc_reader(const char* device = "/dev/ttymxc1");
+    explicit Nfc_reader(const char* device = "/dev/ttyACM2", speed_t baud = B9600);
     ~Nfc_reader();
     
     Nfc_reader(const Nfc_reader&) = delete;
@@ -28,6 +28,7 @@ public:
     
     [[nodiscard]] bool is_initialized() const { return initialized_.load(); }
     [[nodiscard]] bool is_port_open() const { return fd_ >= 0; }
+    [[nodiscard]] std::string get_init_error() const { return init_error_; }
     
     void initialize();
     void start();
@@ -44,6 +45,7 @@ private:
     uint8_t counter_ = 0;
     std::atomic<bool> initialized_{false};
     std::atomic<bool> running_{false};
+    std::string init_error_;
     CardCallback card_callback_;
     LogCallback log_callback_;
     

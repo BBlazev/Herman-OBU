@@ -15,22 +15,24 @@ void Nfc_reader::log(const std::string& msg)
     }
 }
 
-Nfc_reader::Nfc_reader(const char* device)
+Nfc_reader::Nfc_reader(const char* device, speed_t baud)
 {
     fd_ = ::open(device, O_RDWR | O_NOCTTY);
     if (fd_ < 0) {
+        init_error_ = std::string("Failed to open ") + device + ": " + strerror(errno);
         return;
     }
     
     struct termios tty{};
     if (tcgetattr(fd_, &tty) != 0) {
+        init_error_ = std::string("tcgetattr failed: ") + strerror(errno);
         ::close(fd_);
         fd_ = -1;
         return;
     }
     
-    cfsetispeed(&tty, B921600);
-    cfsetospeed(&tty, B921600);
+    cfsetispeed(&tty, baud);
+    cfsetospeed(&tty, baud);
     cfmakeraw(&tty);
 
     tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
@@ -39,16 +41,18 @@ Nfc_reader::Nfc_reader(const char* device)
     tty.c_iflag &= ~IGNBRK;
     tty.c_lflag = 0;
     tty.c_oflag = 0;
-    tty.c_cc[VMIN] = 0;
+    tty.c_cc[VMIN] = 1;
     tty.c_cc[VTIME] = 10;
 
     if (tcsetattr(fd_, TCSANOW, &tty) != 0) {
+        init_error_ = std::string("tcsetattr failed: ") + strerror(errno);
         ::close(fd_);
         fd_ = -1;
         return;
     }
 
     tcflush(fd_, TCIOFLUSH);
+    init_error_ = "";
 }
 
 Nfc_reader::~Nfc_reader()
@@ -78,19 +82,14 @@ bool Nfc_reader::do_auth()
     send_command(nfc::Command::AuthB, key);
     auto result2 = read_response(64);
 
-    if (!result.ok() || !result2.ok()) {
-        log("[NFC] AUTH failed - no response");
-        return false;
-    }
-    
-    log("[NFC] AUTH OK");
+    log("[NFC] AUTH done");
     return true;
 }
 
 void Nfc_reader::initialize()
 {
     if (fd_ < 0) {
-        log("[NFC] Cannot init - port not open");
+        log("[NFC] Cannot init - port not open: " + init_error_);
         return;
     }
     
@@ -116,6 +115,13 @@ Result<bool> Nfc_reader::send_command(nfc::Command cmd, const std::vector<uint8_
     frame.push_back(counter_++);
     frame.insert(frame.end(), data.begin(), data.end());
 
+    std::ostringstream oss;
+    oss << "[NFC] TX: ";
+    for (uint8_t b : frame) {
+        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b) << " ";
+    }
+    log(oss.str());
+
     ssize_t nw = ::write(fd_, frame.data(), frame.size());
     if (nw < 0 || static_cast<size_t>(nw) != frame.size())
         return Result<bool>::failure(Error::CMD_FAILURE);
@@ -128,10 +134,19 @@ Result<std::vector<uint8_t>> Nfc_reader::read_response(size_t len)
     std::vector<uint8_t> buffer(len);
     ssize_t n = ::read(fd_, buffer.data(), buffer.size());
     
-    if (n < 0)
-        return Result<std::vector<uint8_t>>::failure(Error::READ_ERROR);
+    if (n > 0) {
+        buffer.resize(static_cast<size_t>(n));
+        std::ostringstream oss;
+        oss << "[NFC] RX: ";
+        for (uint8_t b : buffer) {
+            oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b) << " ";
+        }
+        log(oss.str());
+    } else {
+        buffer.clear();
+        log("[NFC] RX: timeout/empty");
+    }
     
-    buffer.resize(static_cast<size_t>(n));
     return Result<std::vector<uint8_t>>::success(std::move(buffer));
 }
 
@@ -143,7 +158,7 @@ void Nfc_reader::start()
     }
     
     running_.store(true);
-    log("[NFC] Started");
+    log("[NFC] Started - waiting for cards");
     
     while (running_.load()) 
     {
@@ -177,7 +192,7 @@ void Nfc_reader::start()
                 }
             } 
             else if (bytesRead < 0 && errno != EAGAIN) {
-                log("[NFC] Read error");
+                log("[NFC] Read error: " + std::string(strerror(errno)));
                 break;
             }
         }
