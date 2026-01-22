@@ -13,6 +13,7 @@ add_library(obu-sdk STATIC
     src/terminal.cpp
     src/qr_scanner.cpp
     src/nfc_reader.cpp
+    src/helpers.cpp
 )
 
 target_include_directories(obu-sdk PUBLIC 
