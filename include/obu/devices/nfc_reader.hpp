@@ -3,6 +3,7 @@
 #include "transport/serial.hpp"
 #include "common/types.hpp"
 #include "common/response.hpp"
+#include "common/helpers.hpp"
 #include <string>
 #include <vector>
 #include <atomic>
