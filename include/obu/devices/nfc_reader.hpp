@@ -1,13 +1,11 @@
 #pragma once
 
-#include "transport/serial.hpp"
 #include "common/types.hpp"
 #include "common/response.hpp"
-#include "common/helpers.hpp"
 #include <string>
-#include <vector>
 #include <atomic>
 #include <functional>
+#include <vector>
 
 namespace nfc {
     enum class Command : uint8_t {
@@ -18,15 +16,6 @@ namespace nfc {
         ReadCard  = 0xE3
     };
 }
-
-#pragma once
-
-#include "common/types.hpp"
-#include "common/response.hpp"
-#include <string>
-#include <vector>
-#include <atomic>
-#include <functional>
 
 class Nfc_reader
 {
@@ -42,7 +31,6 @@ public:
     void start();
     void stop() { running_.store(false); }
     
-    // Callbacks
     using CardCallback = std::function<void(const CardInfo&)>;
     using LogCallback = std::function<void(const std::string&)>;
     
@@ -58,7 +46,8 @@ private:
     LogCallback log_callback_;
     
     void log(const std::string& msg);
-    void initialize();
-    void send_cmd(uint8_t cmd, const std::vector<uint8_t>& data = {});
-    std::vector<uint8_t> read_resp(size_t expected_size);
+    Result<bool> init(const char* device);
+    Result<bool> auth();
+    Result<bool> send_command(nfc::Command cmd, const std::vector<uint8_t>& data = {});
+    Result<std::vector<uint8_t>> read_response(size_t len);
 };

@@ -1,8 +1,9 @@
 #include "common/helpers.hpp"
-#include <sstream>
 #include <iomanip>
+#include <sstream>
 
-std::string bytesToHex(const std::vector<uint8_t>& data)
+
+std::string bytesToHex(const std::vector<uint8_t>& data) 
 {
     std::ostringstream oss;
     oss << std::uppercase << std::hex << std::setfill('0');
@@ -12,7 +13,10 @@ std::string bytesToHex(const std::vector<uint8_t>& data)
     return oss.str();
 }
 
-std::optional<CardInfo> parseCardInfo(const std::vector<uint8_t>& frame)
+
+
+
+std::optional<CardInfo> parseCardInfo(const std::vector<uint8_t>& frame) 
 {
     if (frame.size() < 10) {
         return std::nullopt;
@@ -76,7 +80,6 @@ std::optional<CardInfo> parseCardInfo(const std::vector<uint8_t>& frame)
 
     info.atqa = static_cast<uint16_t>((static_cast<uint16_t>(payload[pos]) << 8) | payload[pos + 1]);
     pos += 2;
-    
     info.ct = payload[pos++];
 
     std::vector<uint8_t> uid;
