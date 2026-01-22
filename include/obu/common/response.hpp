@@ -2,6 +2,9 @@
 
 #include <stdint.h>
 #include <string>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 static constexpr uint8_t ADDR_REQ = 0xF2;
 static constexpr uint8_t AUTH_A = 0x02;
