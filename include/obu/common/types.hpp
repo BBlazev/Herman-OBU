@@ -8,7 +8,10 @@ enum class Error
     TIMEOUT,
     CRC_MISSMATCH,
     INVALID_RESPONSE,
-    PORT_ERROR
+    PORT_ERROR,
+    NFC_INIT,
+    NFC_AUTH,
+    CMD_FAILURE
 };
 
 template<typename T> 

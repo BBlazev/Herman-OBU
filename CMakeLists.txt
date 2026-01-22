@@ -11,6 +11,7 @@ add_library(obu-sdk STATIC
     src/mboard.cpp
     src/terminal.cpp
     src/qr_scanner.cpp
+	src/nfc_reader.cpp
 )
 
 target_include_directories(obu-sdk PUBLIC 
@@ -18,6 +19,6 @@ target_include_directories(obu-sdk PUBLIC
 )
 
 # CLI Test - static linked
-add_executable(cli_test examples/cli_test.cpp)
-target_link_libraries(cli_test PRIVATE obu-sdk)
-set_target_properties(cli_test PROPERTIES LINK_FLAGS "-static")
+add_executable(qt_gui examples/qt_gui.cpp)
+target_link_libraries(qt_gui PRIVATE obu-sdk)
+set_target_properties(qt_gui PROPERTIES LINK_FLAGS "-static")

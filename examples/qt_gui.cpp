@@ -7,6 +7,7 @@
 #include "devices/mboard.hpp"
 #include "devices/terminal.hpp"
 #include "devices/qr_scanner.hpp"
+#include "devices/nfc_reader.hpp"
 
 class ObuGui : public QWidget
 {
@@ -19,6 +20,7 @@ public:
         auto* layout = new QVBoxLayout(this);
         
         status_label_ = new QLabel("Status: Not connected");
+        nfc_label_ = new QLabel("Status: NFC not working");
         layout->addWidget(status_label_);
         
         auto* btn_mboard = new QPushButton("Mboard ALIVE");
@@ -36,6 +38,10 @@ public:
         auto* btn_qr = new QPushButton("Scan QR");
         connect(btn_qr, &QPushButton::clicked, this, &ObuGui::scanQr);
         layout->addWidget(btn_qr);
+
+        auto* btn_nfc = new QPushButton("NFC card");
+        connect(btn_nfc, &QPushButton::clicked,this, &ObuGui::nfc)
+        layout->addWidget(btn_nfc);
         
         qr_label_ = new QLabel("QR: -");
         layout->addWidget(qr_label_);
@@ -86,11 +92,19 @@ private slots:
         status_label_->setText("Ready");
     }
 
+    void nfc()
+    {
+        if(nfc_.initialized.ok())
+            nfc_label_->setText("NFC WORKING...");
+        
+    }
+
 private:
     SerialPort mboard_serial_, term_serial_, qr_serial_;
     Mboard mboard_;
     Terminal terminal_;
     QrScanner qr_;
+    Nfc_reader nfc_;
     QLabel* status_label_;
     QLabel* qr_label_;
 };
