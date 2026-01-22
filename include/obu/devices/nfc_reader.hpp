@@ -27,7 +27,9 @@ public:
     Nfc_reader& operator=(const Nfc_reader&) = delete;
     
     [[nodiscard]] bool is_initialized() const { return initialized_.load(); }
+    [[nodiscard]] bool is_port_open() const { return fd_ >= 0; }
     
+    void initialize();
     void start();
     void stop() { running_.store(false); }
     
@@ -46,8 +48,7 @@ private:
     LogCallback log_callback_;
     
     void log(const std::string& msg);
-    Result<bool> init(const char* device);
-    Result<bool> auth();
+    bool do_auth();
     Result<bool> send_command(nfc::Command cmd, const std::vector<uint8_t>& data = {});
     Result<std::vector<uint8_t>> read_response(size_t len);
 };

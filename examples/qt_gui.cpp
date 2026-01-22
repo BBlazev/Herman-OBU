@@ -104,15 +104,22 @@ public:
         }
         qr_serial_.set_timeout_ms(3000);
         
+
         nfc_.set_log_callback([this](const std::string& msg) {
             std::lock_guard<std::mutex> lock(queue_mutex_);
             log_queue_.push(QString::fromStdString(msg));
         });
         
-        if (nfc_.is_initialized()) {
-            logMsg("[INIT] NFC OK");
+        if (nfc_.is_port_open()) {
+            logMsg("[INIT] NFC port open, initializing...");
+            nfc_.initialize();
+            if (nfc_.is_initialized()) {
+                logMsg("[INIT] NFC OK");
+            } else {
+                logMsg("[INIT] NFC auth failed");
+            }
         } else {
-            logMsg("[INIT] NFC FAILED");
+            logMsg("[INIT] NFC port FAILED to open");
         }
         
         status_label_->setText("Status: Ready");

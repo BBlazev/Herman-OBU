@@ -6,6 +6,7 @@
 #include <cstring>
 #include <sstream>
 #include <iomanip>
+#include <cerrno>
 
 void Nfc_reader::log(const std::string& msg)
 {
@@ -16,32 +17,16 @@ void Nfc_reader::log(const std::string& msg)
 
 Nfc_reader::Nfc_reader(const char* device)
 {
-    auto result = init(device);
-    if (!result.ok()) {
-        log("[NFC] Init failed");
-    }
-}
-
-Nfc_reader::~Nfc_reader()
-{
-    stop();
-    if (fd_ >= 0) {
-        ::close(fd_);
-        fd_ = -1;
-    }
-}
-
-Result<bool> Nfc_reader::init(const char* device)
-{
     fd_ = ::open(device, O_RDWR | O_NOCTTY);
-    if (fd_ < 0)
-        return Result<bool>::failure(Error::NFC_INIT);
+    if (fd_ < 0) {
+        return;
+    }
     
     struct termios tty{};
     if (tcgetattr(fd_, &tty) != 0) {
         ::close(fd_);
         fd_ = -1;
-        return Result<bool>::failure(Error::PORT_ERROR);
+        return;
     }
     
     cfsetispeed(&tty, B921600);
@@ -60,14 +45,66 @@ Result<bool> Nfc_reader::init(const char* device)
     if (tcsetattr(fd_, TCSANOW, &tty) != 0) {
         ::close(fd_);
         fd_ = -1;
-        return Result<bool>::failure(Error::PORT_ERROR);
+        return;
     }
 
     tcflush(fd_, TCIOFLUSH);
+}
+
+Nfc_reader::~Nfc_reader()
+{
+    stop();
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
+}
+
+bool Nfc_reader::do_auth()
+{
+    log("[NFC] AUTH PART A");
+    send_command(nfc::Command::AuthA);
+    auto result = read_response(16);
+
+    std::vector<uint8_t> key;
+    if (result.ok() && result.value().size() >= 4) {
+        key.assign(result.value().begin() + 4, result.value().end());
+        log("[NFC] Got key: " + std::to_string(key.size()) + " bytes");
+    } else {
+        log("[NFC] No valid Auth Key, continuing with empty key");
+    }
+
+    log("[NFC] AUTH PART B");
+    send_command(nfc::Command::AuthB, key);
+    auto result2 = read_response(64);
+
+    if (!result.ok() || !result2.ok()) {
+        log("[NFC] AUTH failed - no response");
+        return false;
+    }
     
-    auto auth_result = auth();
-    initialized_.store(auth_result.ok());
-    return auth_result;
+    log("[NFC] AUTH OK");
+    return true;
+}
+
+void Nfc_reader::initialize()
+{
+    if (fd_ < 0) {
+        log("[NFC] Cannot init - port not open");
+        return;
+    }
+    
+    if (initialized_.load()) {
+        log("[NFC] Already initialized");
+        return;
+    }
+    
+    if (do_auth()) {
+        initialized_.store(true);
+        log("[NFC] Initialized OK");
+    } else {
+        log("[NFC] Init failed");
+    }
 }
 
 Result<bool> Nfc_reader::send_command(nfc::Command cmd, const std::vector<uint8_t>& data)
@@ -96,30 +133,6 @@ Result<std::vector<uint8_t>> Nfc_reader::read_response(size_t len)
     
     buffer.resize(static_cast<size_t>(n));
     return Result<std::vector<uint8_t>>::success(std::move(buffer));
-}
-
-Result<bool> Nfc_reader::auth()
-{
-    log("[NFC] AUTH PART A");
-    send_command(nfc::Command::AuthA);
-    auto result = read_response(16);
-
-    std::vector<uint8_t> key;
-    if (result.ok() && result.value().size() >= 4) {
-        key.assign(result.value().begin() + 4, result.value().end());
-    } else {
-        log("[NFC] No valid Auth Key received, continuing with empty key");
-    }
-
-    log("[NFC] AUTH PART B");
-    send_command(nfc::Command::AuthB, key);
-    auto result2 = read_response(64);
-
-    if (!result.value().empty() && !result2.value().empty())
-        return Result<bool>::failure(Error::NFC_AUTH);
-    
-    log("[NFC] AUTH OK");
-    return Result<bool>::success(true);
 }
 
 void Nfc_reader::start()
