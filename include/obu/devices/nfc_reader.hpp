@@ -6,7 +6,6 @@
 #include <atomic>
 #include <functional>
 #include <vector>
-#include <termios.h>
 
 namespace nfc {
     enum class Command : uint8_t {
@@ -21,7 +20,7 @@ namespace nfc {
 class Nfc_reader
 {
 public:
-    explicit Nfc_reader(const char* device = "/dev/ttyACM2", speed_t baud = B9600);
+    explicit Nfc_reader(const char* host = "127.0.0.1", int port = 4543);
     ~Nfc_reader();
     
     Nfc_reader(const Nfc_reader&) = delete;

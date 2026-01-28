@@ -205,7 +205,7 @@ private slots:
         
         if (!nfc_) {
             logMsg("[NFC] Creating NFC reader on /dev/ttyACM2...");
-            nfc_ = std::make_unique<Nfc_reader>("/dev/ttyACM2", B9600);
+            nfc_ = std::make_unique<Nfc_reader>("127.0.0.1", 4543);
             
             nfc_->set_log_callback([this](const std::string& msg) {
                 std::lock_guard<std::mutex> lock(queue_mutex_);
