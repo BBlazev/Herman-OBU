@@ -38,8 +38,8 @@ public:
         pendingOp_ = "read_uid";
         
         // Format: "010000" + seqNum(4 digits) + "95" (read NFC UID command)
-        QString msg = QString("010000%195")
-            .arg(nextCounter(), 4, 10, QChar('0'));
+        QString seqNum = QString("%1").arg(nextCounter(), 4, 10, QChar('0'));
+        QString msg = "010000" + seqNum + "95";
         
         sendMessage(msg);
         keepAliveTimer_->start(500);
