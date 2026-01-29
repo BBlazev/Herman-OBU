@@ -17,7 +17,7 @@ public:
         connect(socket_, &QTcpSocket::connected, this, &CorvusNfcQt::onConnected);
         connect(socket_, &QTcpSocket::disconnected, this, &CorvusNfcQt::onDisconnected);
         connect(socket_, &QTcpSocket::readyRead, this, &CorvusNfcQt::onReadyRead);
-        connect(socket_, QOverload<QAbstractSocket::SocketError>::of(&QTcpSocket::error),
+        connect(socket_, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),
                 this, &CorvusNfcQt::onError);
     }
     
@@ -27,48 +27,31 @@ public:
         socket_->connectToHost(host, port);
     }
     
-    void logon(const QString& opId = "1", const QString& password = "23646")
-    {
-        qDebug() << "Sending logon...";
-        pendingOp_ = "logon";
-        QByteArray msg = buildLogonMsg(nextCounter(), opId, password);
-        socket_->write(msg);
-    }
-    
     void readNfcUid()
     {
-        qDebug() << "Reading NFC UID...";
+        qDebug() << "Reading NFC UID... Place card on reader";
         pendingOp_ = "read_uid";
         QByteArray msg = buildReadUidMsg(nextCounter());
-        socket_->write(msg);
-    }
-    
-    void readCardData()
-    {
-        qDebug() << "Reading card data...";
-        pendingOp_ = "read_card";
-        QByteArray msg = buildReadCardMsg(nextCounter());
+        qDebug() << "Sending:" << msg.toHex();
         socket_->write(msg);
     }
 
 signals:
     void connected();
     void disconnected();
-    void logonComplete(bool success);
     void uidRead(const QString& uid);
-    void cardDataRead(const QString& pan);
     void error(const QString& message);
 
 private slots:
     void onConnected()
     {
-        qDebug() << "Connected to terminal";
+        qDebug() << "Connected to ECRProxy";
         emit connected();
     }
     
     void onDisconnected()
     {
-        qDebug() << "Disconnected from terminal";
+        qDebug() << "Disconnected";
         emit disconnected();
     }
     
@@ -76,22 +59,16 @@ private slots:
     {
         QByteArray data = socket_->readAll();
         qDebug() << "Received:" << data.toHex();
+        qDebug() << "Received (text):" << data;
         
-        if (pendingOp_ == "logon") {
-            emit logonComplete(true);
-        } else if (pendingOp_ == "read_uid") {
+        if (pendingOp_ == "read_uid") {
             QString uid = parseUidResponse(data);
             if (!uid.isEmpty()) {
                 emit uidRead(uid);
-            }
-        } else if (pendingOp_ == "read_card") {
-            QString pan = parseCardResponse(data);
-            if (!pan.isEmpty()) {
-                emit cardDataRead(pan);
+            } else {
+                qDebug() << "No UID in response, waiting...";
             }
         }
-        
-        pendingOp_.clear();
     }
     
     void onError(QAbstractSocket::SocketError err)
@@ -121,42 +98,18 @@ private:
         return lrc;
     }
     
-    QByteArray buildLogonMsg(uint16_t counter, const QString& opId, const QString& pwd)
-    {
-        QString payload = QString("0100900000%1%2%3%4%5%6")
-            .arg(counter, 4, 10, QChar('0'))
-            .arg(FS).arg("01").arg(opId)
-            .arg(FS).arg("02").arg(pwd);
-        
-        QByteArray msg;
-        msg.append(STX);
-        msg.append(payload.toLatin1());
-        msg.append(ETX);
-        msg.append(static_cast<char>(calculateLrc(payload.toLatin1())));
-        return msg;
-    }
-    
     QByteArray buildReadUidMsg(uint16_t counter)
     {
-        QString payload = QString("0200900100%1").arg(counter, 4, 10, QChar('0'));
+        QByteArray payload;
+        payload.append("0200");
+        payload.append("900100");
+        payload.append(QString("%1").arg(counter, 4, 10, QChar('0')).toLatin1());
         
         QByteArray msg;
         msg.append(STX);
-        msg.append(payload.toLatin1());
+        msg.append(payload);
         msg.append(ETX);
-        msg.append(static_cast<char>(calculateLrc(payload.toLatin1())));
-        return msg;
-    }
-    
-    QByteArray buildReadCardMsg(uint16_t counter)
-    {
-        QString payload = QString("0200900200%1").arg(counter, 4, 10, QChar('0'));
-        
-        QByteArray msg;
-        msg.append(STX);
-        msg.append(payload.toLatin1());
-        msg.append(ETX);
-        msg.append(static_cast<char>(calculateLrc(payload.toLatin1())));
+        msg.append(static_cast<char>(calculateLrc(payload)));
         return msg;
     }
     
@@ -165,23 +118,6 @@ private:
         int fsPos = data.indexOf(FS);
         while (fsPos >= 0 && fsPos + 2 < data.size()) {
             if (data[fsPos + 1] == '6' && data[fsPos + 2] == '3') {
-                int start = fsPos + 3;
-                int end = data.indexOf(FS, start);
-                if (end < 0) end = data.indexOf(ETX, start);
-                if (end > start) {
-                    return QString::fromLatin1(data.mid(start, end - start));
-                }
-            }
-            fsPos = data.indexOf(FS, fsPos + 1);
-        }
-        return QString();
-    }
-    
-    QString parseCardResponse(const QByteArray& data)
-    {
-        int fsPos = data.indexOf(FS);
-        while (fsPos >= 0 && fsPos + 2 < data.size()) {
-            if (data[fsPos + 1] == '3' && data[fsPos + 2] == '5') {
                 int start = fsPos + 3;
                 int end = data.indexOf(FS, start);
                 if (end < 0) end = data.indexOf(ETX, start);
@@ -206,15 +142,8 @@ int main(int argc, char* argv[])
     CorvusNfcQt reader;
     
     QObject::connect(&reader, &CorvusNfcQt::connected, [&reader]() {
-        qDebug() << "=== Connected, sending logon ===";
-        reader.logon();
-    });
-    
-    QObject::connect(&reader, &CorvusNfcQt::logonComplete, [&reader](bool ok) {
-        if (ok) {
-            qDebug() << "=== Logon OK, reading NFC UID ===";
-            reader.readNfcUid();
-        }
+        qDebug() << "=== Connected, reading NFC UID ===";
+        reader.readNfcUid();
     });
     
     QObject::connect(&reader, &CorvusNfcQt::uidRead, [](const QString& uid) {
@@ -228,7 +157,7 @@ int main(int argc, char* argv[])
     });
     
     QTimer::singleShot(30000, []() {
-        qDebug() << "=== Timeout ===";
+        qDebug() << "=== Timeout (30 sec) ===";
         QCoreApplication::quit();
     });
     
