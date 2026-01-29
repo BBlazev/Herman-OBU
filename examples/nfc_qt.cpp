@@ -17,7 +17,8 @@ public:
         connect(socket_, &QTcpSocket::connected, this, &CorvusNfcQt::onConnected);
         connect(socket_, &QTcpSocket::disconnected, this, &CorvusNfcQt::onDisconnected);
         connect(socket_, &QTcpSocket::readyRead, this, &CorvusNfcQt::onReadyRead);
-        connect(socket_, &QTcpSocket::errorOccurred, this, &CorvusNfcQt::onError);
+        connect(socket_, QOverload<QAbstractSocket::SocketError>::of(&QTcpSocket::error),
+                this, &CorvusNfcQt::onError);
     }
     
     void connectToTerminal(const QString& host = "127.0.0.1", int port = 4543)
