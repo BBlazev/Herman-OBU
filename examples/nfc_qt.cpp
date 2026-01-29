@@ -3,6 +3,7 @@
 #include <QTimer>
 #include <QDebug>
 #include <QByteArray>
+#include <QDataStream>
 
 class CorvusNfcQt : public QObject
 {
@@ -13,12 +14,16 @@ public:
         : QObject(parent)
         , socket_(new QTcpSocket(this))
         , counter_(0)
+        , expectedLen_(0)
     {
         connect(socket_, &QTcpSocket::connected, this, &CorvusNfcQt::onConnected);
         connect(socket_, &QTcpSocket::disconnected, this, &CorvusNfcQt::onDisconnected);
         connect(socket_, &QTcpSocket::readyRead, this, &CorvusNfcQt::onReadyRead);
         connect(socket_, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),
                 this, &CorvusNfcQt::onError);
+                
+        keepAliveTimer_ = new QTimer(this);
+        connect(keepAliveTimer_, &QTimer::timeout, this, &CorvusNfcQt::sendKeepAlive);
     }
     
     void connectToTerminal(const QString& host = "127.0.0.1", int port = 4543)
@@ -29,11 +34,15 @@ public:
     
     void readNfcUid()
     {
-        qDebug() << "Reading NFC UID... Place card on reader";
+        qDebug() << "Reading NFC UID... Place card on Ingenico";
         pendingOp_ = "read_uid";
-        QByteArray msg = buildReadUidMsg(nextCounter());
-        qDebug() << "Sending:" << msg.toHex();
-        socket_->write(msg);
+        
+        // Format: "010000" + seqNum(4 digits) + "95" (read NFC UID command)
+        QString msg = QString("010000%195")
+            .arg(nextCounter(), 4, 10, QChar('0'));
+        
+        sendMessage(msg);
+        keepAliveTimer_->start(500);
     }
 
 signals:
@@ -52,21 +61,45 @@ private slots:
     void onDisconnected()
     {
         qDebug() << "Disconnected";
+        keepAliveTimer_->stop();
         emit disconnected();
     }
     
     void onReadyRead()
     {
-        QByteArray data = socket_->readAll();
-        qDebug() << "Received:" << data.toHex();
-        qDebug() << "Received (text):" << data;
+        buffer_.append(socket_->readAll());
         
-        if (pendingOp_ == "read_uid") {
-            QString uid = parseUidResponse(data);
-            if (!uid.isEmpty()) {
-                emit uidRead(uid);
-            } else {
-                qDebug() << "No UID in response, waiting...";
+        while (buffer_.size() >= 2) {
+            if (expectedLen_ == 0) {
+                expectedLen_ = ((unsigned char)buffer_[0] << 8) | (unsigned char)buffer_[1];
+                buffer_.remove(0, 2);
+                
+                if (expectedLen_ == 0) {
+                    continue;
+                }
+                qDebug() << "Expecting" << expectedLen_ << "bytes";
+            }
+            
+            if (buffer_.size() < expectedLen_) {
+                return;
+            }
+            
+            QByteArray data = buffer_.left(expectedLen_);
+            buffer_.remove(0, expectedLen_);
+            expectedLen_ = 0;
+            
+            qDebug() << "Received:" << data;
+            
+            if (pendingOp_ == "read_uid" && data.length() >= 15) {
+                QString respCode = QString::fromLatin1(data.mid(12, 3));
+                qDebug() << "Response code:" << respCode;
+                
+                if (respCode == "000") {
+                    QString uid = QString::fromLatin1(data.mid(15)).trimmed();
+                    keepAliveTimer_->stop();
+                    emit uidRead(uid);
+                    return;
+                }
             }
         }
     }
@@ -75,64 +108,45 @@ private slots:
     {
         Q_UNUSED(err)
         qDebug() << "Socket error:" << socket_->errorString();
+        keepAliveTimer_->stop();
         emit error(socket_->errorString());
+    }
+    
+    void sendKeepAlive()
+    {
+        char keepalive[2] = {0, 0};
+        socket_->write(keepalive, 2);
+        socket_->flush();
     }
 
 private:
-    static constexpr char STX = 0x02;
-    static constexpr char ETX = 0x03;
-    static constexpr char FS = 0x1C;
-    
     uint16_t nextCounter()
     {
         counter_ = (counter_ + 1) % 10000;
         return counter_;
     }
     
-    static uint8_t calculateLrc(const QByteArray& data)
+    void sendMessage(const QString& msg)
     {
-        uint8_t lrc = 0;
-        for (char c : data) {
-            lrc ^= static_cast<uint8_t>(c);
-        }
-        return lrc;
-    }
-    
-    QByteArray buildReadUidMsg(uint16_t counter)
-    {
-        QByteArray payload;
-        payload.append("0200");
-        payload.append("900100");
-        payload.append(QString("%1").arg(counter, 4, 10, QChar('0')).toLatin1());
+        QByteArray data = msg.toLatin1();
         
-        QByteArray msg;
-        msg.append(STX);
-        msg.append(payload);
-        msg.append(ETX);
-        msg.append(static_cast<char>(calculateLrc(payload)));
-        return msg;
-    }
-    
-    QString parseUidResponse(const QByteArray& data)
-    {
-        int fsPos = data.indexOf(FS);
-        while (fsPos >= 0 && fsPos + 2 < data.size()) {
-            if (data[fsPos + 1] == '6' && data[fsPos + 2] == '3') {
-                int start = fsPos + 3;
-                int end = data.indexOf(FS, start);
-                if (end < 0) end = data.indexOf(ETX, start);
-                if (end > start) {
-                    return QString::fromLatin1(data.mid(start, end - start));
-                }
-            }
-            fsPos = data.indexOf(FS, fsPos + 1);
-        }
-        return QString();
+        char lenBuf[2];
+        lenBuf[0] = (data.length() >> 8) & 0xFF;
+        lenBuf[1] = data.length() & 0xFF;
+        
+        qDebug() << "Sending:" << data;
+        
+        socket_->write(lenBuf, 2);
+        socket_->write(data);
+        socket_->flush();
     }
     
     QTcpSocket* socket_;
+    QTimer* keepAliveTimer_;
+    QByteArray buffer_;
     uint16_t counter_;
     QString pendingOp_;
+    int expectedLen_;
 };
 
 int main(int argc, char* argv[])
@@ -147,7 +161,7 @@ int main(int argc, char* argv[])
     });
     
     QObject::connect(&reader, &CorvusNfcQt::uidRead, [](const QString& uid) {
-        qDebug() << "=== NFC UID:" << uid << "===";
+        qDebug() << "=== SUCCESS! NFC UID:" << uid << "===";
         QCoreApplication::quit();
     });
     
