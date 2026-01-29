@@ -25,17 +25,14 @@ target_link_libraries(obu-sdk PUBLIC pthread)
 add_executable(cli_test examples/cli_test.cpp)
 target_link_libraries(cli_test PRIVATE obu-sdk)
 
-add_executable(corvus_nfc_example examples/corvus_nfc_example.cpp)
+add_executable(corvus_nfc_example examples/nfc_qt.cpp)
 target_link_libraries(corvus_nfc_example PRIVATE obu-sdk)
-
-add_executable(nfc_example examples/nfc_example.cpp)
-target_link_libraries(nfc_example PRIVATE obu-sdk)
 
 option(BUILD_QT_GUI "Build Qt GUI example" OFF)
 
 if(BUILD_QT_GUI)
     find_package(Qt5 COMPONENTS Widgets Network REQUIRED)
     
-    add_executable(corvus_nfc_qt examples/corvus_nfc_qt_example.cpp)
+    add_executable(corvus_nfc_qt examples/nfc_qt.cpp)
     target_link_libraries(corvus_nfc_qt PRIVATE obu-sdk Qt5::Widgets Qt5::Network)
 endif()
