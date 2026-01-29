@@ -1,5 +1,6 @@
 #include "devices/qr_scanner.hpp"
 #include <algorithm>
+#include <chrono>
 
 namespace {
     constexpr uint8_t CMD_PREFIX = 0x16;
