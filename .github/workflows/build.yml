@@ -63,4 +63,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: obu-qt-gui
-          path: build/qt_gui
+          path: build/nfc_qt
