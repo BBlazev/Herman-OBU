@@ -1,56 +1,65 @@
 #pragma once
 
 #include "common/types.hpp"
-#include "common/response.hpp"
 #include <string>
-#include <atomic>
 #include <functional>
+#include <atomic>
+#include <cstdint>
 #include <vector>
 
-namespace nfc {
-    enum class Command : uint8_t {
-        AddrReq   = 0xF2,
-        AuthA     = 0x02,
-        AuthB     = 0x03,
-        Enable    = 0x63,
-        ReadCard  = 0xE3
-    };
-}
+namespace obu {
 
-class Nfc_reader
+class CorvusNfcReader
 {
 public:
-    explicit Nfc_reader(const char* host = "127.0.0.1", int port = 4543);
-    ~Nfc_reader();
+    static constexpr const char* DEFAULT_HOST = "127.0.0.1";
+    static constexpr int DEFAULT_PORT = 4543;
+    static constexpr int DEFAULT_TIMEOUT_SEC = 20;
     
-    Nfc_reader(const Nfc_reader&) = delete;
-    Nfc_reader& operator=(const Nfc_reader&) = delete;
+    using UidCallback = std::function<void(const std::string& uid)>;
     
-    [[nodiscard]] bool is_initialized() const { return initialized_.load(); }
-    [[nodiscard]] bool is_port_open() const { return fd_ >= 0; }
-    [[nodiscard]] std::string get_init_error() const { return init_error_; }
+    explicit CorvusNfcReader(const char* host = DEFAULT_HOST, int port = DEFAULT_PORT);
+    ~CorvusNfcReader();
     
-    void initialize();
-    void start();
-    void stop() { running_.store(false); }
+    CorvusNfcReader(const CorvusNfcReader&) = delete;
+    CorvusNfcReader& operator=(const CorvusNfcReader&) = delete;
     
-    using CardCallback = std::function<void(const CardInfo&)>;
-    using LogCallback = std::function<void(const std::string&)>;
+    Result<bool> connect();
+    void disconnect();
+    bool is_connected() const { return socket_fd_ >= 0; }
     
-    void set_card_callback(CardCallback cb) { card_callback_ = std::move(cb); }
-    void set_log_callback(LogCallback cb) { log_callback_ = std::move(cb); }
+    Result<bool> logon(const std::string& operator_id = "1", const std::string& password = "23646");
+    Result<bool> is_terminal_operational();
+    
+    Result<std::string> read_nfc_uid(int timeout_sec = DEFAULT_TIMEOUT_SEC);
+    Result<std::string> read_card_data(int timeout_sec = DEFAULT_TIMEOUT_SEC);
+    
+    void start_reading(UidCallback callback);
+    void stop_reading() { running_.store(false); }
+    bool is_running() const { return running_.load(); }
+    
+    std::string get_last_error() const { return last_error_; }
 
 private:
-    int fd_ = -1;
-    uint8_t counter_ = 0;
-    std::atomic<bool> initialized_{false};
+    std::string host_;
+    int port_;
+    int socket_fd_{-1};
+    uint16_t counter_{0};
     std::atomic<bool> running_{false};
-    std::string init_error_;
-    CardCallback card_callback_;
-    LogCallback log_callback_;
+    std::string last_error_;
     
-    void log(const std::string& msg);
-    bool do_auth();
-    Result<bool> send_command(nfc::Command cmd, const std::vector<uint8_t>& data = {});
-    Result<std::vector<uint8_t>> read_response(size_t len);
+    uint16_t next_counter();
+    
+    Result<bool> send_message(const std::vector<uint8_t>& msg);
+    Result<std::vector<uint8_t>> receive_message(int timeout_sec);
+    
+    std::vector<uint8_t> build_logon_msg(uint16_t counter, const std::string& op_id, const std::string& pwd);
+    std::vector<uint8_t> build_read_uid_msg(uint16_t counter);
+    std::vector<uint8_t> build_read_card_msg(uint16_t counter);
+    std::vector<uint8_t> build_operational_msg(uint16_t counter);
+    
+    std::string parse_uid_response(const std::vector<uint8_t>& response);
+    std::string parse_card_response(const std::vector<uint8_t>& response);
 };
+
+} 
