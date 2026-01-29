@@ -12,7 +12,10 @@ enum class Error
     NFC_INIT,
     NFC_AUTH,
     CMD_FAILURE,
-    READ_ERROR
+    READ_ERROR,
+    WRITE_ERROR,
+    PARSE_ERROR
+
 };
 
 template<typename T> 
