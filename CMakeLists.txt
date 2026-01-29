@@ -6,14 +6,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 add_library(obu-sdk STATIC
-    src/transport/serial.cpp
-    src/protocol/epdi.cpp
-    src/devices/mboard.cpp
-    src/devices/terminal.cpp
-    src/devices/qr_scanner.cpp
+    src/serial.cpp
+    src/epdi.cpp
+    src/mboard.cpp
+    src/terminal.cpp
+    src/qr_scanner.cpp
     src/obu/nfc_reader.cpp
     src/validator/nfc_reader.cpp
-    src/common/helpers.cpp
+    src/helpers.cpp
 )
 
 target_include_directories(obu-sdk PUBLIC 
