@@ -236,4 +236,4 @@ int main(int argc, char* argv[])
     return app.exec();
 }
 
-#include "corvus_nfc_qt_example.moc"
+#include "nfc_qt.moc"
