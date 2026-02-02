@@ -1,4 +1,4 @@
-#include "obu/corvus_nfc_reader.hpp"
+#include "obu/devices/corvus_nfc_reader.hpp"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
