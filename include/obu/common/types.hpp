@@ -14,7 +14,8 @@ enum class Error
     CMD_FAILURE,
     READ_ERROR,
     WRITE_ERROR,
-    PARSE_ERROR
+    PARSE_ERROR,
+    DEVICE_ERROR
 
 };
 
