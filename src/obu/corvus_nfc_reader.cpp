@@ -1,4 +1,4 @@
-#include "obu/devices/corvus_nfc_reader.hpp"
+#include "obu/corvus_nfc_reader.hpp"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -11,25 +11,110 @@
 #include <chrono>
 #include <thread>
 
-// For SHA1
-#include <openssl/sha.h>
-
 namespace obu {
 
 namespace {
 
+class SHA1 {
+public:
+    SHA1() { reset(); }
+    
+    void update(const uint8_t* data, size_t len) {
+        for (size_t i = 0; i < len; ++i) {
+            buffer_[bufferLen_++] = data[i];
+            if (bufferLen_ == 64) {
+                processBlock();
+                totalLen_ += 512;
+                bufferLen_ = 0;
+            }
+        }
+    }
+    
+    void final(uint8_t* digest) {
+        totalLen_ += bufferLen_ * 8;
+        buffer_[bufferLen_++] = 0x80;
+        
+        if (bufferLen_ > 56) {
+            while (bufferLen_ < 64) buffer_[bufferLen_++] = 0;
+            processBlock();
+            bufferLen_ = 0;
+        }
+        
+        while (bufferLen_ < 56) buffer_[bufferLen_++] = 0;
+        
+        for (int i = 7; i >= 0; --i) {
+            buffer_[bufferLen_++] = (totalLen_ >> (i * 8)) & 0xFF;
+        }
+        processBlock();
+        
+        for (int i = 0; i < 5; ++i) {
+            digest[i * 4 + 0] = (h_[i] >> 24) & 0xFF;
+            digest[i * 4 + 1] = (h_[i] >> 16) & 0xFF;
+            digest[i * 4 + 2] = (h_[i] >> 8) & 0xFF;
+            digest[i * 4 + 3] = h_[i] & 0xFF;
+        }
+    }
+    
+private:
+    void reset() {
+        h_[0] = 0x67452301;
+        h_[1] = 0xEFCDAB89;
+        h_[2] = 0x98BADCFE;
+        h_[3] = 0x10325476;
+        h_[4] = 0xC3D2E1F0;
+        bufferLen_ = 0;
+        totalLen_ = 0;
+    }
+    
+    void processBlock() {
+        uint32_t w[80];
+        for (int i = 0; i < 16; ++i) {
+            w[i] = (buffer_[i * 4] << 24) | (buffer_[i * 4 + 1] << 16) |
+                   (buffer_[i * 4 + 2] << 8) | buffer_[i * 4 + 3];
+        }
+        for (int i = 16; i < 80; ++i) {
+            w[i] = rotl(w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16], 1);
+        }
+        
+        uint32_t a = h_[0], b = h_[1], c = h_[2], d = h_[3], e = h_[4];
+        
+        for (int i = 0; i < 80; ++i) {
+            uint32_t f, k;
+            if (i < 20) { f = (b & c) | ((~b) & d); k = 0x5A827999; }
+            else if (i < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
+            else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
+            else { f = b ^ c ^ d; k = 0xCA62C1D6; }
+            
+            uint32_t temp = rotl(a, 5) + f + e + k + w[i];
+            e = d; d = c; c = rotl(b, 30); b = a; a = temp;
+        }
+        
+        h_[0] += a; h_[1] += b; h_[2] += c; h_[3] += d; h_[4] += e;
+    }
+    
+    static uint32_t rotl(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
+    
+    uint32_t h_[5];
+    uint8_t buffer_[64];
+    size_t bufferLen_;
+    uint64_t totalLen_;
+};
+
 // Convert password to SHA1 hash (password padded to 9 bytes with zeros)
 std::string sha1_hex(const std::string& password) {
-    unsigned char padded[9] = {0};
+    uint8_t padded[9] = {0};
     size_t len = std::min(password.size(), size_t(9));
     memcpy(padded, password.c_str(), len);
     
-    unsigned char hash[SHA_DIGEST_LENGTH];
-    SHA1(padded, 9, hash);
+    SHA1 sha;
+    sha.update(padded, 9);
+    
+    uint8_t hash[20];
+    sha.final(hash);
     
     std::ostringstream oss;
     oss << std::uppercase << std::hex << std::setfill('0');
-    for (int i = 0; i < SHA_DIGEST_LENGTH; ++i) {
+    for (int i = 0; i < 20; ++i) {
         oss << std::setw(2) << static_cast<int>(hash[i]);
     }
     return oss.str();
@@ -503,4 +588,4 @@ void CorvusNfcReader::start_reading(UidCallback callback)
     }
 }
 
-} // namespace obu
+} 
