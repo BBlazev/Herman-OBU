@@ -13,6 +13,7 @@ add_library(obu-sdk STATIC
     src/qr_scanner.cpp
     src/helpers.cpp
     src/obu/nfc_reader.cpp
+    src/obu/corvus_nfc_reader.cpp
     src/validator/nfc_reader.cpp
 )
 

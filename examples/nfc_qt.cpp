@@ -3,8 +3,20 @@
 #include <QTimer>
 #include <QDebug>
 #include <QByteArray>
-#include <QDataStream>
+#include <QCryptographicHash>
 
+/**
+ * Corvus NFC Reader - Qt Example
+ * 
+ * Reads NFC card UIDs via Ingenico iUC160B terminal through ECRProxy.
+ * 
+ * Protocol (based on LIIngenicoECR.java):
+ * - Messages: 2-byte length (big endian) + ASCII payload
+ * - Check terminal: "300000" + seq(4) + "01" -> "32...000" = OK
+ * - Logon: "010000" + seq(4) + "01" + "L1;P" + SHA1(password) -> "11...000" = OK  
+ * - Read NFC UID: "010000" + seq(4) + "95" -> keepalive -> "11...95000" + UID
+ * - Keepalive: send 0x00 0x00 every 250ms while waiting
+ */
 class CorvusNfcQt : public QObject
 {
     Q_OBJECT
@@ -28,26 +40,60 @@ public:
     
     void connectToTerminal(const QString& host = "127.0.0.1", int port = 4543)
     {
-        qDebug() << "Connecting to" << host << ":" << port;
+        qDebug() << "Connecting to ECRProxy at" << host << ":" << port;
         socket_->connectToHost(host, port);
+    }
+    
+    void checkTerminal()
+    {
+        qDebug() << "Checking terminal...";
+        pendingOp_ = "check";
+        
+        // Format: "300000" + seq(4) + "01"
+        QString seqNum = QString("%1").arg(nextCounter(), 4, 10, QChar('0'));
+        QString msg = "300000" + seqNum + "01";
+        
+        sendMessage(msg.toLatin1());
+        keepAliveTimer_->start(250);
+    }
+    
+    void logon(const QString& operatorId = "1", const QString& password = "23646")
+    {
+        qDebug() << "Logging in...";
+        pendingOp_ = "logon";
+        
+        // Password hash: SHA1 of password padded to 9 bytes
+        QByteArray paddedPwd(9, '\0');
+        QByteArray pwdBytes = password.toLatin1();
+        memcpy(paddedPwd.data(), pwdBytes.constData(), qMin(pwdBytes.size(), 9));
+        QString hash = QCryptographicHash::hash(paddedPwd, QCryptographicHash::Sha1).toHex().toUpper();
+        
+        // Format: "010000" + seq(4) + "01" + "L" + operatorId + ";P" + hash
+        QString seqNum = QString("%1").arg(nextCounter(), 4, 10, QChar('0'));
+        QString msg = "010000" + seqNum + "01L" + operatorId + ";P" + hash;
+        
+        sendMessage(msg.toLatin1());
+        keepAliveTimer_->start(250);
     }
     
     void readNfcUid()
     {
-        qDebug() << "Reading NFC UID... Place card on Ingenico";
+        qDebug() << "Reading NFC UID... Place card on Ingenico!";
         pendingOp_ = "read_uid";
         
-        // Format: "010000" + seqNum(4 digits) + "95" (read NFC UID command)
+        // Format: "010000" + seq(4) + "95"
         QString seqNum = QString("%1").arg(nextCounter(), 4, 10, QChar('0'));
         QString msg = "010000" + seqNum + "95";
         
-        sendMessage(msg);
-        keepAliveTimer_->start(500);
+        sendMessage(msg.toLatin1());
+        keepAliveTimer_->start(250);
     }
 
 signals:
     void connected();
     void disconnected();
+    void terminalReady();
+    void logonComplete();
     void uidRead(const QString& uid);
     void error(const QString& message);
 
@@ -75,13 +121,12 @@ private slots:
                 buffer_.remove(0, 2);
                 
                 if (expectedLen_ == 0) {
-                    continue;
+                    continue;  // keepalive response
                 }
-                qDebug() << "Expecting" << expectedLen_ << "bytes";
             }
             
             if (buffer_.size() < expectedLen_) {
-                return;
+                return;  // wait for more data
             }
             
             QByteArray data = buffer_.left(expectedLen_);
@@ -89,17 +134,46 @@ private slots:
             expectedLen_ = 0;
             
             qDebug() << "Received:" << data;
-            
-            if (pendingOp_ == "read_uid" && data.length() >= 15) {
-                QString respCode = QString::fromLatin1(data.mid(12, 3));
-                qDebug() << "Response code:" << respCode;
-                
-                if (respCode == "000") {
-                    QString uid = QString::fromLatin1(data.mid(15)).trimmed();
-                    keepAliveTimer_->stop();
-                    emit uidRead(uid);
-                    return;
-                }
+            processResponse(data);
+        }
+    }
+    
+    void processResponse(const QByteArray& data)
+    {
+        QString resp = QString::fromLatin1(data);
+        
+        // Check for success code "000" at position 12-15
+        bool success = (data.size() >= 15 && data.mid(12, 3) == "000");
+        
+        if (pendingOp_ == "check") {
+            keepAliveTimer_->stop();
+            if (success) {
+                qDebug() << "Terminal is operational";
+                emit terminalReady();
+            } else {
+                emit error("Terminal not operational");
+            }
+        }
+        else if (pendingOp_ == "logon") {
+            keepAliveTimer_->stop();
+            if (success) {
+                qDebug() << "Logon successful";
+                emit logonComplete();
+            } else {
+                emit error("Logon failed");
+            }
+        }
+        else if (pendingOp_ == "read_uid") {
+            // Look for "95000" followed by UID
+            int pos = resp.indexOf("95000");
+            if (pos >= 0 && pos + 5 < resp.size()) {
+                keepAliveTimer_->stop();
+                QString uid = resp.mid(pos + 5);
+                qDebug() << "=== NFC UID:" << uid << "===";
+                emit uidRead(uid);
+            } else if (resp.contains("95001")) {
+                // Error 001 = not logged in, retry logon
+                qDebug() << "Not logged in, retrying...";
             }
         }
     }
@@ -126,18 +200,17 @@ private:
         return counter_;
     }
     
-    void sendMessage(const QString& msg)
+    void sendMessage(const QByteArray& msg)
     {
-        QByteArray data = msg.toLatin1();
-        
+        // 2-byte length (big endian) + payload
         char lenBuf[2];
-        lenBuf[0] = (data.length() >> 8) & 0xFF;
-        lenBuf[1] = data.length() & 0xFF;
+        lenBuf[0] = (msg.size() >> 8) & 0xFF;
+        lenBuf[1] = msg.size() & 0xFF;
         
-        qDebug() << "Sending:" << data;
+        qDebug() << "Sending:" << msg;
         
         socket_->write(lenBuf, 2);
-        socket_->write(data);
+        socket_->write(msg);
         socket_->flush();
     }
     
@@ -155,13 +228,21 @@ int main(int argc, char* argv[])
     
     CorvusNfcQt reader;
     
+    // State machine: connect -> check -> logon -> read
     QObject::connect(&reader, &CorvusNfcQt::connected, [&reader]() {
-        qDebug() << "=== Connected, reading NFC UID ===";
+        reader.checkTerminal();
+    });
+    
+    QObject::connect(&reader, &CorvusNfcQt::terminalReady, [&reader]() {
+        reader.logon("1", "23646");
+    });
+    
+    QObject::connect(&reader, &CorvusNfcQt::logonComplete, [&reader]() {
         reader.readNfcUid();
     });
     
     QObject::connect(&reader, &CorvusNfcQt::uidRead, [](const QString& uid) {
-        qDebug() << "=== SUCCESS! NFC UID:" << uid << "===";
+        qDebug() << "\n*** SUCCESS! NFC UID:" << uid << "***\n";
         QCoreApplication::quit();
     });
     
@@ -170,8 +251,8 @@ int main(int argc, char* argv[])
         QCoreApplication::quit();
     });
     
-    QTimer::singleShot(30000, []() {
-        qDebug() << "=== Timeout (30 sec) ===";
+    QTimer::singleShot(60000, []() {
+        qDebug() << "=== Timeout (60 sec) ===";
         QCoreApplication::quit();
     });
     
