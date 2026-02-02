@@ -239,4 +239,4 @@ int main(int argc, char* argv[])
     return app.exec();
 }
 
-#include "nfc_gui.moc"
+#include "nfc_qt.moc"
